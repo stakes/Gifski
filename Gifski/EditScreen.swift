@@ -269,6 +269,7 @@ private struct _EditScreen: View {
 			.containerRelativeFrame(.horizontal, count: 2, span: 1, spacing: 0)
 			.padding(.trailing, -8)
 			Form {
+				GoogleSlidesOptimizationSetting()
 				FrameRateSetting(videoFrameRate: metadata.frameRate)
 				QualitySetting()
 				LoopSetting(loopCount: $loopCount)
@@ -317,7 +318,8 @@ private struct _EditScreen: View {
 				return .forever
 			}(),
 			bounce: bounceGIF,
-			crop: outputCropRect
+			crop: outputCropRect,
+			optimizeForGoogleSlides: Defaults[.optimizeForGoogleSlides]
 		)
 	}
 
@@ -650,9 +652,30 @@ private struct SpeedSetting: View {
 	}
 }
 
+private struct GoogleSlidesOptimizationSetting: View {
+	@Default(.optimizeForGoogleSlides) private var optimizeForGoogleSlides
+	@Default(.outputQuality) private var quality
+	@Default(.outputFPS) private var frameRate
+
+	var body: some View {
+		LabeledContent("Optimize for Google Slides") {
+			Toggle("", isOn: $optimizeForGoogleSlides)
+				.help("Automatically adjusts settings to ensure the GIF is under 10MB for Google Slides compatibility")
+				.onChange(of: optimizeForGoogleSlides) {
+					if optimizeForGoogleSlides {
+						// Start with optimal settings
+						frameRate = 30
+						quality = 1.0
+					}
+				}
+		}
+	}
+}
+
 private struct FrameRateSetting: View {
 	@Default(.outputFPS) private var frameRate
 	@Default(.outputSpeed) private var speed
+	@Default(.optimizeForGoogleSlides) private var optimizeForGoogleSlides
 	@State private var isHighFrameRateWarningPresented = false
 
 	var videoFrameRate: Double
@@ -663,6 +686,7 @@ private struct FrameRateSetting: View {
 				value: $frameRate.intToDouble,
 				in: range
 			)
+			.disabled(optimizeForGoogleSlides)
 			Text("\(frameRate.formatted())")
 				.monospacedDigit()
 				.frame(width: 38, alignment: .leading)
@@ -707,10 +731,12 @@ private struct FrameRateSetting: View {
 
 private struct QualitySetting: View {
 	@Default(.outputQuality) private var quality
+	@Default(.optimizeForGoogleSlides) private var optimizeForGoogleSlides
 
 	var body: some View {
 		LabeledContent("Quality") {
 			Slider(value: $quality, in: 0.01...1)
+				.disabled(optimizeForGoogleSlides)
 			// We replace the non-breaking space with a word-joiner to save space.
 			Text("\(quality.formatted(.percent.noFraction).replacing("\u{00A0}", with: "\u{2060}"))")
 				.monospacedDigit()

@@ -5,6 +5,7 @@ import AVFoundation
 enum Constants {
 	static let allowedFrameRate = 3.0...50.0
 	static let loopCountRange = 0...100
+	static let googleSlidesMaxSize = 9.9 * 1024 * 1024 // 9.9MB in bytes
 }
 
 extension Defaults.Keys {
@@ -14,6 +15,7 @@ extension Defaults.Keys {
 	static let loopGIF = Key<Bool>("loopGif", default: true)
 	static let bounceGIF = Key<Bool>("bounceGif", default: false)
 	static let suppressKeyframeWarning = Key<Bool>("suppressKeyframeWarning", default: false)
+	static let optimizeForGoogleSlides = Key<Bool>("optimizeForGoogleSlides", default: false)
 }
 
 enum Route: Hashable {

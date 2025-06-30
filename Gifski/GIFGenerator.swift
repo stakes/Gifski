@@ -53,6 +53,10 @@ actor GIFGenerator {
 		isEstimation: Bool = false,
 		onProgress: @escaping (Double) -> Void
 	) async throws -> Data {
+		if conversion.optimizeForGoogleSlides {
+			return try await runWithGoogleSlidesOptimization(conversion, isEstimation: isEstimation, onProgress: onProgress)
+		}
+
 		gifski = try Gifski(
 			dimensions: conversion.croppedOutputDimensions,
 			quality: conversion.quality.clamped(to: 0.1...1),
@@ -73,6 +77,102 @@ actor GIFGenerator {
 		try Task.checkCancellation()
 
 		return result
+	}
+
+	private func runWithGoogleSlidesOptimization(
+		_ conversion: Conversion,
+		isEstimation: Bool,
+		onProgress: @escaping (Double) -> Void
+	) async throws -> Data {
+		// Start with optimal settings
+		var optimizedConversion = conversion
+		optimizedConversion.quality = 1.0
+		optimizedConversion.frameRate = 30
+
+		// Binary search for the best quality while staying under size limit
+		var minQuality = 0.1
+		var maxQuality = 1.0
+		var bestData: Data?
+		var attempts = 0
+		let maxAttempts = 5 // Limit the number of attempts to avoid too many iterations
+
+		while attempts < maxAttempts {
+			attempts += 1
+			let currentQuality = (minQuality + maxQuality) / 2
+			optimizedConversion.quality = currentQuality
+
+			// Try current settings
+			gifski = try Gifski(
+				dimensions: optimizedConversion.croppedOutputDimensions,
+				quality: currentQuality,
+				loop: optimizedConversion.loop
+			)
+
+			let data = try await generateData(
+				for: optimizedConversion,
+				isEstimation: isEstimation,
+				onProgress: onProgress
+			)
+
+			if data.count <= Int(Constants.googleSlidesMaxSize) {
+				// This quality works, try higher
+				bestData = data
+				minQuality = currentQuality
+			} else {
+				// Too big, try lower quality
+				maxQuality = currentQuality
+
+				// If we still don't have a valid result, try reducing FPS
+				if bestData == nil && (optimizedConversion.frameRate ?? 30) > 20 {
+					optimizedConversion.frameRate = max(20, (optimizedConversion.frameRate ?? 30) - 5)
+					minQuality = 0.1
+					maxQuality = 1.0
+					attempts = 0 // Reset attempts for new FPS
+				}
+
+				// If we still don't have a valid result and we're at minimum FPS,
+				// try reducing dimensions
+				if bestData == nil && (optimizedConversion.frameRate ?? 0) == 20 {
+					let currentDimensions = optimizedConversion.dimensions ?? optimizedConversion.croppedOutputDimensions
+					let newWidth = Int(Double(currentDimensions?.width ?? 0) * 0.9)
+					let newHeight = Int(Double(currentDimensions?.height ?? 0) * 0.9)
+					optimizedConversion.dimensions = (width: newWidth, height: newHeight)
+					minQuality = 0.1
+					maxQuality = 1.0
+					attempts = 0 // Reset attempts for new dimensions
+				}
+			}
+
+			gifski = nil
+		}
+
+		if let bestData {
+			return bestData
+		}
+
+		// If we still don't have a valid result, use minimum settings
+		optimizedConversion.quality = 0.1
+		optimizedConversion.frameRate = 20
+		let currentDimensions = optimizedConversion.dimensions ?? optimizedConversion.croppedOutputDimensions
+		optimizedConversion.dimensions = (
+			width: Int(Double(currentDimensions?.width ?? 0) * 0.5),
+			height: Int(Double(currentDimensions?.height ?? 0) * 0.5)
+		)
+
+		gifski = try Gifski(
+			dimensions: optimizedConversion.croppedOutputDimensions,
+			quality: optimizedConversion.quality,
+			loop: optimizedConversion.loop
+		)
+
+		let data = try await generateData(
+			for: optimizedConversion,
+			isEstimation: isEstimation,
+			onProgress: onProgress
+		)
+
+		gifski = nil
+		return data
 	}
 
 	/**
@@ -346,16 +446,17 @@ extension GIFGenerator {
 	- Parameter loopGif: Whether output should loop infinitely or not.
 	- Parameter bounce: Whether output should bounce or not.
 	*/
-	struct Conversion: ReflectiveHashable { // TODO
+	struct Conversion: ReflectiveHashable {
 		let asset: AVAsset
 		let sourceURL: URL
 		var timeRange: ClosedRange<Double>?
-		var quality: Double = 1
+		var quality = 1.0
 		var dimensions: (width: Int, height: Int)?
 		var frameRate: Int?
 		var loop: Gifski.Loop
 		var bounce: Bool
 		var crop: CropRect?
+		var optimizeForGoogleSlides = false
 	}
 }
 

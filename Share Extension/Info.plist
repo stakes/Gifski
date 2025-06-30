@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
@@ -15,9 +13,9 @@
 				SUBQUERY (
 					$extensionItem.attachments,
 					$attachment,
-					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO &quot;public.mpeg-4&quot; ||
-					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO &quot;com.apple.m4v-video&quot; ||
-					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO &quot;com.apple.quicktime-movie&quot;
+					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.mpeg-4" ||
+					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.m4v-video" ||
+					ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.quicktime-movie"
 				).@count == $extensionItem.attachments.@count
 			).@count == 1</string>
 		</dict>
