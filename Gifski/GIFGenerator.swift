@@ -84,14 +84,21 @@ actor GIFGenerator {
 		isEstimation: Bool,
 		onProgress: @escaping (Double) -> Void
 	) async throws -> Data {
-		// Start with optimal settings
+		// Calculate initial settings based on target size
 		var optimizedConversion = conversion
-		optimizedConversion.quality = 1.0
-		optimizedConversion.frameRate = 30
-
+		let initialSettings = try await calculateInitialSettings(for: conversion)
+		optimizedConversion.quality = initialSettings.quality
+		optimizedConversion.frameRate = initialSettings.frameRate
+		
+		print("Starting Google Slides optimization with:")
+		print("- Initial quality: \(initialSettings.quality)")
+		print("- Initial frame rate: \(initialSettings.frameRate) fps")
+		print("- Dimensions: \(optimizedConversion.croppedOutputDimensions?.width ?? 0)x\(optimizedConversion.croppedOutputDimensions?.height ?? 0)")
+		print("- Target size: \(Int(Constants.googleSlidesMaxSize).formatted(.byteCount(style: .file)))")
+		
 		// Binary search for the best quality while staying under size limit
 		var minQuality = 0.1
-		var maxQuality = 1.0
+		var maxQuality = optimizedConversion.quality
 		var bestData: Data?
 		var attempts = 0
 		let maxAttempts = 5 // Limit the number of attempts to avoid too many iterations
@@ -100,6 +107,9 @@ actor GIFGenerator {
 			attempts += 1
 			let currentQuality = (minQuality + maxQuality) / 2
 			optimizedConversion.quality = currentQuality
+
+			print("\nAttempt \(attempts):")
+			print("- Testing quality: \(currentQuality)")
 
 			// Try current settings
 			gifski = try Gifski(
@@ -114,43 +124,32 @@ actor GIFGenerator {
 				onProgress: onProgress
 			)
 
+			print("- Result size: \(data.count.formatted(.byteCount(style: .file)))")
+
 			if data.count <= Int(Constants.googleSlidesMaxSize) {
 				// This quality works, try higher
 				bestData = data
 				minQuality = currentQuality
+				print("- Status: Success ✅ (trying higher quality)")
 			} else {
 				// Too big, try lower quality
 				maxQuality = currentQuality
-
-				// If we still don't have a valid result, try reducing FPS
-				if bestData == nil && (optimizedConversion.frameRate ?? 30) > 20 {
-					optimizedConversion.frameRate = max(20, (optimizedConversion.frameRate ?? 30) - 5)
-					minQuality = 0.1
-					maxQuality = 1.0
-					attempts = 0 // Reset attempts for new FPS
-				}
-
-				// If we still don't have a valid result and we're at minimum FPS,
-				// try reducing dimensions
-				if bestData == nil && (optimizedConversion.frameRate ?? 0) == 20 {
-					let currentDimensions = optimizedConversion.dimensions ?? optimizedConversion.croppedOutputDimensions
-					let newWidth = Int(Double(currentDimensions?.width ?? 0) * 0.9)
-					let newHeight = Int(Double(currentDimensions?.height ?? 0) * 0.9)
-					optimizedConversion.dimensions = (width: newWidth, height: newHeight)
-					minQuality = 0.1
-					maxQuality = 1.0
-					attempts = 0 // Reset attempts for new dimensions
-				}
+				print("- Status: Too large ❌ (trying lower quality)")
 			}
 
 			gifski = nil
 		}
 
 		if let bestData {
+			print("\nFinal result:")
+			print("- Quality: \(optimizedConversion.quality)")
+			print("- Frame rate: \(optimizedConversion.frameRate ?? 0) fps")
+			print("- Size: \(bestData.count.formatted(.byteCount(style: .file)))")
 			return bestData
 		}
 
 		// If we still don't have a valid result, use minimum settings
+		print("\nFalling back to minimum settings:")
 		optimizedConversion.quality = 0.1
 		optimizedConversion.frameRate = 20
 		let currentDimensions = optimizedConversion.dimensions ?? optimizedConversion.croppedOutputDimensions
@@ -158,6 +157,9 @@ actor GIFGenerator {
 			width: Int(Double(currentDimensions?.width ?? 0) * 0.5),
 			height: Int(Double(currentDimensions?.height ?? 0) * 0.5)
 		)
+		print("- Quality: 0.1")
+		print("- Frame rate: 20 fps")
+		print("- Dimensions: \(optimizedConversion.dimensions?.width ?? 0)x\(optimizedConversion.dimensions?.height ?? 0)")
 
 		gifski = try Gifski(
 			dimensions: optimizedConversion.croppedOutputDimensions,
@@ -171,8 +173,34 @@ actor GIFGenerator {
 			onProgress: onProgress
 		)
 
+		print("- Final size: \(data.count.formatted(.byteCount(style: .file)))")
+
 		gifski = nil
 		return data
+	}
+
+	/// Calculates initial quality and frame rate settings targeting ~80% of max file size
+	private func calculateInitialSettings(for conversion: Conversion) async throws -> (quality: Double, frameRate: Int) {
+		let targetSize = Double(Constants.googleSlidesMaxSize) * 0.8 // Target 80% of max size for safety margin
+		let dimensions = conversion.croppedOutputDimensions
+		let duration = try await conversion.gifDuration
+		
+		// Start with default frame rate
+		let initialFrameRate = min(30, conversion.frameRate ?? 30)
+		
+		// Use the naive estimation formula to calculate initial quality
+		let frameCount = duration.toTimeInterval * Double(initialFrameRate)
+		let pixelCount = Double(dimensions?.width ?? 0) * Double(dimensions?.height ?? 0)
+		let baseSize = (pixelCount * frameCount) / 3
+		
+		// Solve for quality: targetSize = baseSize * (quality + 1.5) / 2.5
+		var quality = ((targetSize * 2.5) / baseSize) - 1.5
+		
+		// Clamp quality and frame rate to reasonable ranges
+		quality = quality.clamped(to: 0.1...1.0)
+		let frameRate = initialFrameRate.clamped(to: 20...30)
+		
+		return (quality: quality, frameRate: frameRate)
 	}
 
 	/**
